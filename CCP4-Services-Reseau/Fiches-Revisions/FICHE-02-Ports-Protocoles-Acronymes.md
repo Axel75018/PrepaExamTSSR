@@ -47,7 +47,7 @@
 
 ### 🎯 Mnémotechnique pour les ports ESSENTIELS
 ```
-22 = SSH → "22 c'est l'âge pour conduire secure"
+22 = SSH → "22 vla les flics"
 25 = SMTP → "25 décembre = on envoie des cartes (mails)"
 53 = DNS → "53 régions, chacune a son nom"
 80 = HTTP → "8-0 = H-ttp (ressemble au H)"
