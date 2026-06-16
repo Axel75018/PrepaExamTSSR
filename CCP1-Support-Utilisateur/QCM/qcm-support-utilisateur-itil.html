@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QCM Support Utilisateur & ITIL</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #1f2937; background: #f8fafc; }
+    body { margin: 0; }
+    header { background: #111827; color: white; padding: 24px; }
+    main { max-width: 980px; margin: 0 auto; padding: 24px; }
+    .card { background: white; border: 1px solid #e5e7eb; border-radius: 14px; padding: 18px; margin: 16px 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+    .question h3 { margin-top: 0; }
+    label { display: block; padding: 10px 12px; margin: 8px 0; border: 1px solid #e5e7eb; border-radius: 10px; cursor: pointer; }
+    label:hover { background: #f9fafb; }
+    input[type="radio"] { margin-right: 8px; }
+    button { border: 0; border-radius: 10px; padding: 12px 18px; font-weight: 700; cursor: pointer; margin-right: 10px; }
+    .primary { background: #2563eb; color: white; }
+    .secondary { background: #e5e7eb; color: #111827; }
+    .good { border-color: #16a34a; background: #f0fdf4; }
+    .bad { border-color: #dc2626; background: #fef2f2; }
+    .answer { margin-top: 10px; padding: 12px; border-radius: 10px; background: #f3f4f6; }
+    .hidden { display: none; }
+    .score { font-size: 1.5rem; font-weight: 800; }
+    .muted { color: #6b7280; }
+    .toolbar { position: sticky; bottom: 0; background: rgba(248,250,252,.95); border-top: 1px solid #e5e7eb; padding: 16px 0; backdrop-filter: blur(8px); }
+    .error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; padding: 12px; border-radius: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>QCM Support Utilisateur & ITIL</h1>
+    <p>40 questions — coche tes réponses, valide, consulte ton score et les corrections.</p>
+  </header>
+
+  <main>
+    <section id="status" class="card">Chargement du QCM depuis GitHub…</section>
+    <section id="result" class="card hidden"></section>
+    <form id="quiz"></form>
+    <div class="toolbar hidden" id="toolbar">
+      <button class="primary" type="button" id="submitBtn">Valider le test</button>
+      <button class="secondary" type="button" id="resetBtn">Nouveau test</button>
+    </div>
+  </main>
+
+<script>
+const QUESTIONS_URL = "https://raw.githubusercontent.com/Axel75018/PrepaExamTSSR/main/CCP1-Support-Utilisateur/QCM/Evaluation/QCM-Support-ITIL-40Q.md";
+const CORRECTIONS_URL = "https://raw.githubusercontent.com/Axel75018/PrepaExamTSSR/main/CCP1-Support-Utilisateur/QCM/Correction/QCM-Support-ITIL-40Q-CORRECTIONS.md";
+
+const quizEl = document.querySelector("#quiz");
+const statusEl = document.querySelector("#status");
+const resultEl = document.querySelector("#result");
+const toolbarEl = document.querySelector("#toolbar");
+const submitBtn = document.querySelector("#submitBtn");
+const resetBtn = document.querySelector("#resetBtn");
+let questions = [];
+let corrections = {};
+
+function parseQuestions(md) {
+  const blocks = md.split(/###\s*Question\s+/).slice(1);
+
+  return blocks.map(block => {
+    const num = Number(block.match(/^(\d+)/)?.[1]);
+    const content = block.replace(/^\d+\s*/, "").trim();
+
+    const optionRegex = /[-*]\s*\[\s*\]\s*([A-D])\)\s*(.*?)(?=\s*[-*]\s*\[\s*\]\s*[A-D]\)|\s*[-*]\s*[A-D]\)|\s*###\s*Question|\s*---|$)|[-*]\s*([A-D])\)\s*(.*?)(?=\s*[-*]\s*\[\s*\]\s*[A-D]\)|\s*[-*]\s*[A-D]\)|\s*###\s*Question|\s*---|$)/gs;
+    const options = [];
+    let match;
+
+    while ((match = optionRegex.exec(content)) !== null) {
+      const letter = match[1] || match[3];
+      const text = match[2] || match[4];
+      options.push({
+        letter,
+        text: text.trim()
+      });
+    }
+
+    const firstOptionIndex = content.search(/[-*]\s*\[\s*\]\s*A\)|[-*]\s*A\)/);
+    const title = firstOptionIndex >= 0 ? content.slice(0, firstOptionIndex).trim() : content.trim();
+
+    return { num, title, options };
+  }).filter(q => q.num && q.options.length);
+}
+
+function parseCorrections(md) {
+  const found = {};
+  const regex = /\*\*Question\s+(\d+)\s*:\s*([A-D])\)/g;
+  let match;
+  while ((match = regex.exec(md)) !== null) {
+    found[Number(match[1])] = match[2];
+  }
+  return found;
+}
+
+function renderQuiz() {
+  quizEl.innerHTML = questions.map(q => `
+    <article class="card question" id="q${q.num}">
+      <h3>Question ${q.num}</h3>
+      <p>${escapeHtml(q.title)}</p>
+      ${q.options.map(opt => `
+        <label data-question="${q.num}" data-answer="${opt.letter}">
+          <input type="radio" name="q${q.num}" value="${opt.letter}">
+          <strong>${opt.letter})</strong> ${escapeHtml(opt.text)}
+        </label>
+      `).join("")}
+      <div class="answer hidden" id="answer${q.num}"></div>
+    </article>
+  `).join("");
+}
+
+function validateQuiz() {
+  let score = 0;
+  const mistakes = [];
+
+  questions.forEach(q => {
+    const selected = document.querySelector(`input[name="q${q.num}"]:checked`)?.value;
+    const correct = corrections[q.num];
+    const card = document.querySelector(`#q${q.num}`);
+    const answerBox = document.querySelector(`#answer${q.num}`);
+
+    card.querySelectorAll("label").forEach(label => {
+      label.classList.remove("good", "bad");
+      if (label.dataset.answer === correct) label.classList.add("good");
+      if (selected && label.dataset.answer === selected && selected !== correct) label.classList.add("bad");
+    });
+
+    if (selected === correct) {
+      score++;
+    } else {
+      mistakes.push(q.num);
+    }
+
+    answerBox.classList.remove("hidden");
+    answerBox.innerHTML = selected
+      ? `Ta réponse : <strong>${selected}</strong> — Bonne réponse : <strong>${correct}</strong>`
+      : `Pas de réponse — Bonne réponse : <strong>${correct}</strong>`;
+  });
+
+  const percent = Math.round(score / questions.length * 100);
+  resultEl.classList.remove("hidden");
+  resultEl.innerHTML = `
+    <p class="score">Score : ${score} / ${questions.length} — ${percent}%</p>
+    <p>${level(score)}</p>
+    ${mistakes.length ? `<p>Questions à revoir : ${mistakes.map(n => `<a href="#q${n}">${n}</a>`).join(", ")}</p>` : `<p>Parfait, aucune erreur.</p>`}
+  `;
+  resultEl.scrollIntoView({ behavior: "smooth" });
+}
+
+function level(score) {
+  const ratio = score / questions.length;
+  if (ratio >= 0.90) return "⭐⭐⭐ Expert — très solide.";
+  if (ratio >= 0.75) return "⭐⭐ Très bien — quelques détails à revoir.";
+  if (ratio >= 0.60) return "⭐ Bien — relis les notions faibles.";
+  if (ratio >= 0.45) return "Moyen — révision approfondie nécessaire.";
+  return "Insuffisant — revoir le module.";
+}
+
+function resetQuiz() {
+  document.querySelectorAll("input[type=radio]").forEach(i => i.checked = false);
+  document.querySelectorAll("label").forEach(l => l.classList.remove("good", "bad"));
+  document.querySelectorAll(".answer").forEach(a => a.classList.add("hidden"));
+  resultEl.classList.add("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function escapeHtml(str) {
+  return str.replace(/[&<>'"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+}
+
+async function init() {
+  try {
+    const [qmd, cmd] = await Promise.all([
+      fetch(QUESTIONS_URL).then(r => r.text()),
+      fetch(CORRECTIONS_URL).then(r => r.text())
+    ]);
+    questions = parseQuestions(qmd);
+    corrections = parseCorrections(cmd);
+
+    if (!questions.length) throw new Error("Aucune question détectée.");
+    if (Object.keys(corrections).length < questions.length) throw new Error("Toutes les corrections n'ont pas été détectées.");
+
+    statusEl.innerHTML = `<strong>${questions.length} questions chargées.</strong> Tu peux commencer.`;
+    toolbarEl.classList.remove("hidden");
+    renderQuiz();
+  } catch (err) {
+    statusEl.innerHTML = `<div class="error">Erreur de chargement : ${escapeHtml(err.message)}<br>Astuce : ouvre cette page via un petit serveur local ou GitHub Pages, pas forcément en double-cliquant sur le fichier.</div>`;
+  }
+}
+
+submitBtn.addEventListener("click", validateQuiz);
+resetBtn.addEventListener("click", resetQuiz);
+init();
+</script>
+</body>
+</html>
