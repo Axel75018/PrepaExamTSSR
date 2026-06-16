@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QCM Linux - CCP3</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#172033;background:#f6f8fb}
+    body{margin:0} header{background:#111827;color:white;padding:24px 18px} header h1{margin:0 0 10px;font-size:1.8rem} header p{margin:0}
+    main{max-width:980px;margin:0 auto;padding:24px}.card{background:white;border:1px solid #d9e0ea;border-radius:14px;padding:18px;margin:16px 0;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+    .question h3{margin-top:0}.part{font-weight:800;color:#374151;margin:28px 0 8px}.opt{display:block;padding:10px 12px;margin:8px 0;border:1px solid #e5e7eb;border-radius:10px;cursor:pointer;background:#fff}.opt:hover{background:#f9fafb}.opt input{margin-right:8px}.good{border-color:#16a34a;background:#f0fdf4}.bad{border-color:#dc2626;background:#fef2f2}.missed{border-color:#f59e0b;background:#fffbeb}.muted{color:#6b7280}.hidden{display:none}.score{font-size:1.45rem;font-weight:800}.toolbar{position:sticky;bottom:0;background:rgba(246,248,251,.95);border-top:1px solid #e5e7eb;padding:16px 0;backdrop-filter:blur(8px)}button{border:0;border-radius:10px;padding:12px 18px;font-weight:800;cursor:pointer;margin-right:10px}.primary{background:#2563eb;color:white}.secondary{background:#e5e7eb;color:#111827}.danger{background:#fee2e2;color:#991b1b}.error{background:#fef2f2;color:#991b1b;border:1px solid #fecaca;padding:12px;border-radius:10px}.answer{margin-top:10px;padding:12px;border-radius:10px;background:#f3f4f6}.topline{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}.progress{font-weight:700;color:#374151}.small{font-size:.92rem}
+  </style>
+</head>
+<body>
+<header>
+  <h1>QCM Linux - CCP3 Maintenance Linux</h1>
+  <p>50 questions — coche tes réponses, valide, consulte ton score et les corrections.</p>
+</header>
+<main>
+  <section id="status" class="card">Chargement du QCM depuis GitHub…</section>
+  <section id="result" class="card hidden"></section>
+  <form id="quiz"></form>
+  <div class="toolbar hidden" id="toolbar">
+    <button class="primary" type="button" id="submitBtn">Valider le test</button>
+    <button class="secondary" type="button" id="resetBtn">Nouveau test</button>
+  </div>
+</main>
+<script>
+const QUESTIONS_URL="https://raw.githubusercontent.com/Axel75018/PrepaExamTSSR/main/CCP3-Maintenance-Linux/QCM/Evaluation/QCM-Linux.md";
+const CORRECTIONS_URL="https://raw.githubusercontent.com/Axel75018/PrepaExamTSSR/main/CCP3-Maintenance-Linux/QCM/Correction/QCM-Linux-CORRECTION.md";
+let questions=[]; let corrections={}; let submitted=false;
+const $=s=>document.querySelector(s);
+function normalize(md){return md.replace(/\r/g,'').replace(/\u00a0/g,' ');}
+function parseQuestions(md){
+  md=normalize(md);
+  const re=/\*\*Question\s+(\d+)\*\*\s*:\s*(.*?)(?=\s*\*\*Question\s+\d+\*\*\s*:|\s*---\s*###\s*PARTIE|\s*---\s*$|$)/gs;
+  const out=[]; let m;
+  while((m=re.exec(md))!==null){
+    const num=Number(m[1]); const block=m[2].trim();
+    const optRe=/-\s*\[\s*\]\s*([A-D])\)\s*(.*?)(?=\s*-\s*\[\s*\]\s*[A-D]\)|$)/gs;
+    const options=[]; let om;
+    while((om=optRe.exec(block))!==null){options.push({letter:om[1],text:om[2].trim()});}
+    const first=block.search(/-\s*\[\s*\]\s*A\)/);
+    const title=(first>=0?block.slice(0,first):block).trim();
+    if(num&&title&&options.length) out.push({num,title,options});
+  }
+  return out;
+}
+function parseCorrections(md){
+  md=normalize(md);
+  const map={};
+  const re=/\*\*Question\s+(\d+)\s*:\s*([A-D])\)\s*(.*?)(?=\s*\*\*Question\s+\d+\s*:|$)/gs;
+  let m;
+  while((m=re.exec(md))!==null){
+    map[Number(m[1])]={answer:m[2],detail:m[3].trim()};
+  }
+  return map;
+}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function render(){
+  $('#status').classList.add('hidden'); $('#toolbar').classList.remove('hidden');
+  const form=$('#quiz'); form.innerHTML=''; let currentPart='';
+  questions.forEach((q,i)=>{
+    if((q.num-1)%10===0){
+      const part=document.createElement('div'); part.className='part'; part.textContent=`Partie ${Math.floor((q.num-1)/10)+1}`; form.appendChild(part);
+    }
+    const card=document.createElement('section'); card.className='card question'; card.id=`q${q.num}`;
+    const chosen=localStorage.getItem(storageKey(q.num))||'';
+    card.innerHTML=`<div class="topline"><h3>Question ${q.num}</h3><span class="progress small">${i+1} / ${questions.length}</span></div><p>${esc(q.title)}</p>`+
+      q.options.map(o=>`<label class="opt" data-q="${q.num}" data-letter="${o.letter}"><input type="radio" name="q${q.num}" value="${o.letter}" ${chosen===o.letter?'checked':''}> <strong>${o.letter})</strong> ${esc(o.text)}</label>`).join('')+
+      `<div class="answer hidden" id="a${q.num}"></div>`;
+    form.appendChild(card);
+  });
+  form.addEventListener('change',e=>{if(e.target.matches('input[type=radio]')) localStorage.setItem(storageKey(e.target.name.slice(1)), e.target.value);});
+}
+function storageKey(num){return 'qcm-linux-q'+num;}
+function submit(){
+  submitted=true; let score=0; const wrong=[]; const unanswered=[];
+  questions.forEach(q=>{
+    const selected=document.querySelector(`input[name="q${q.num}"]:checked`)?.value;
+    const correct=corrections[q.num]?.answer;
+    document.querySelectorAll(`label[data-q="${q.num}"]`).forEach(l=>{l.classList.remove('good','bad','missed');
+      const letter=l.dataset.letter; if(letter===correct) l.classList.add('good'); if(selected&&letter===selected&&selected!==correct) l.classList.add('bad'); if(!selected&&letter===correct) l.classList.add('missed');
+    });
+    const box=document.getElementById('a'+q.num);
+    box.classList.remove('hidden'); box.innerHTML=`<strong>Bonne réponse : ${correct||'?'}.</strong> ${corrections[q.num]?.detail?esc(corrections[q.num].detail):''}`;
+    if(selected===correct) score++; else if(selected) wrong.push(q.num); else unanswered.push(q.num);
+  });
+  const pct=Math.round(score/questions.length*100);
+  $('#result').classList.remove('hidden');
+  $('#result').innerHTML=`<div class="score">Score : ${score} / ${questions.length} — ${pct}%</div>`+
+    `<p class="muted">${wrong.length?`Questions fausses : ${wrong.join(', ')}.`:'Aucune mauvaise réponse.'} ${unanswered.length?`Non répondues : ${unanswered.join(', ')}.`:''}</p>`;
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function reset(){
+  questions.forEach(q=>localStorage.removeItem(storageKey(q.num)));
+  submitted=false; $('#result').classList.add('hidden'); $('#result').innerHTML=''; render(); window.scrollTo({top:0,behavior:'smooth'});
+}
+async function init(){
+  try{
+    const [qmd,cmd]=await Promise.all([fetch(QUESTIONS_URL).then(r=>{if(!r.ok)throw new Error('Questions introuvables'); return r.text()}),fetch(CORRECTIONS_URL).then(r=>{if(!r.ok)throw new Error('Corrections introuvables'); return r.text()})]);
+    questions=parseQuestions(qmd); corrections=parseCorrections(cmd);
+    if(!questions.length) throw new Error('Aucune question détectée.');
+    render();
+  }catch(e){$('#status').innerHTML=`<div class="error"><strong>Erreur :</strong> ${esc(e.message)}<br>Vérifie les chemins GitHub ou le format Markdown.</div>`;}
+}
+$('#submitBtn').addEventListener('click',submit); $('#resetBtn').addEventListener('click',reset); init();
+</script>
+</body>
+</html>
