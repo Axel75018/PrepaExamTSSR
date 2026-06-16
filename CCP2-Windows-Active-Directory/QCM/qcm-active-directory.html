@@ -57,17 +57,26 @@ let questions = [];
 let corrections = {};
 
 function parseQuestions(md) {
-  const blocks = md.split(/### Question\s+/).slice(1);
+  const blocks = md.split(/###\s*Question\s+/).slice(1);
+
   return blocks.map(block => {
     const num = Number(block.match(/^(\d+)/)?.[1]);
-    const textPart = block.replace(/^\d+\s*/, "").trim();
-    const firstOption = textPart.search(/\n\s*\*\s*A\)/);
-    const title = textPart.slice(0, firstOption).trim();
-    const optionsRaw = textPart.slice(firstOption).match(/\*\s*([A-D])\)\s*([^\n]+)/g) || [];
-    const options = optionsRaw.map(line => {
-      const m = line.match(/\*\s*([A-D])\)\s*(.+)/);
-      return { letter: m[1], text: m[2].trim() };
-    });
+    const content = block.replace(/^\d+\s*/, "").trim();
+
+    const optionRegex = /-\s*\[\s*\]\s*([A-D])\)\s*(.*?)(?=\s*-\s*\[\s*\]\s*[A-D]\)|\s*###\s*Question|\s*---|$)/gs;
+    const options = [];
+    let match;
+
+    while ((match = optionRegex.exec(content)) !== null) {
+      options.push({
+        letter: match[1],
+        text: match[2].trim()
+      });
+    }
+
+    const firstOptionIndex = content.search(/-\s*\[\s*\]\s*A\)/);
+    const title = content.slice(0, firstOptionIndex).trim();
+
     return { num, title, options };
   }).filter(q => q.num && q.options.length);
 }
