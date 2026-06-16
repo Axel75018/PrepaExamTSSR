@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Questions ouvertes - CCP3 Linux</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #111827; background: #f3f4f6; }
+    body { margin: 0; }
+    header { background: #111827; color: white; padding: 26px 16px; text-align: center; }
+    header h1 { margin: 0 0 10px; font-size: clamp(1.5rem, 3vw, 2.2rem); }
+    header p { margin: 0; color: #e5e7eb; }
+    main { max-width: 980px; margin: 0 auto; padding: 24px; }
+    .card { background: white; border: 1px solid #d1d5db; border-radius: 14px; padding: 18px; margin: 16px 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+    .question h2 { margin-top: 0; font-size: 1.2rem; }
+    .question-text { line-height: 1.55; white-space: pre-wrap; }
+    textarea { width: 100%; min-height: 140px; margin-top: 12px; padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; font: inherit; box-sizing: border-box; resize: vertical; }
+    button { border: 0; border-radius: 10px; padding: 11px 16px; font-weight: 700; cursor: pointer; margin: 8px 8px 8px 0; }
+    .primary { background: #2563eb; color: white; }
+    .secondary { background: #e5e7eb; color: #111827; }
+    .danger { background: #fee2e2; color: #991b1b; }
+    .correction { background: #f8fafc; border-left: 5px solid #2563eb; padding: 14px; border-radius: 10px; margin-top: 12px; white-space: pre-wrap; line-height: 1.5; }
+    .hidden { display: none; }
+    .scorebox { font-size: 1.2rem; font-weight: 800; background: #ecfdf5; border-color: #86efac; }
+    .toolbar { position: sticky; bottom: 0; background: rgba(243,244,246,.95); border-top: 1px solid #d1d5db; padding: 14px 0; backdrop-filter: blur(8px); }
+    .note { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 12px; }
+    .note input { width: 80px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 8px; font: inherit; }
+    code, pre { background: #f1f5f9; border-radius: 6px; padding: 2px 5px; }
+    .error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Questions ouvertes - CCP3 Maintenance Linux</h1>
+    <p>Réponds, affiche la correction, puis auto-évalue ta réponse.</p>
+  </header>
+  <main>
+    <section id="status" class="card">Chargement depuis GitHub…</section>
+    <section id="result" class="card scorebox hidden"></section>
+    <section id="questions"></section>
+    <div class="toolbar hidden" id="toolbar">
+      <button class="primary" type="button" id="scoreBtn">Calculer mon score</button>
+      <button class="secondary" type="button" id="showAllBtn">Afficher toutes les corrections</button>
+      <button class="danger" type="button" id="resetBtn">Nouvelle tentative</button>
+    </div>
+  </main>
+
+<script>
+const QUESTIONS_URL = "https://raw.githubusercontent.com/Axel75018/PrepaExamTSSR/main/CCP3-Maintenance-Linux/Questions-Ouvertes/Evaluation/Questions-Ouvertes-Linux-20Q.md";
+const CORRECTIONS_URL = "https://raw.githubusercontent.com/Axel75018/PrepaExamTSSR/main/CCP3-Maintenance-Linux/Questions-Ouvertes/Correction/Questions-Ouvertes-Linux-20Q-CORRECTIONS.md";
+
+const POINTS_PER_QUESTION = 1;
+
+function cleanText(text) {
+  return text
+    .replace(/\r/g, "")
+    .replace(/\*\*Ma réponse\*\*\s*:\s*```[\s\S]*?```/g, "")
+    .replace(/_{10,}/g, "")
+    .replace(/---/g, "")
+    .trim();
+}
+
+function parseQuestions(md) {
+  const normalized = md.replace(/\r/g, "");
+  const regex = /###\s*Question\s+(\d+)\s*-\s*([^\n]*)([\s\S]*?)(?=###\s*Question\s+\d+\s*-|##\s*AUTO|$)/g;
+  const questions = [];
+  let match;
+
+  while ((match = regex.exec(normalized)) !== null) {
+    questions.push({
+      num: Number(match[1]),
+      title: match[2].trim(),
+      text: cleanText(match[3])
+    });
+  }
+
+  return questions;
+}
+
+function parseCorrections(md) {
+  const normalized = md.replace(/\r/g, "");
+  const corrections = {};
+  const regex = /###\s*✔️?\s*Question\s+(\d+)\s*-\s*([^\n]*)([\s\S]*?)(?=---\s*###\s*✔️?\s*Question\s+\d+\s*-|###\s*✔️?\s*Question\s+\d+\s*-|##\s*AUTO|##\s*THÉMATIQUES|$)/g;
+  let match;
+
+  while ((match = regex.exec(normalized)) !== null) {
+    corrections[Number(match[1])] = cleanText(match[3]).replace(/^\*\*Réponse modèle\*\*\s*:\s*/i, "").trim();
+  }
+
+  return corrections;
+}
+
+function renderQuestions(questions, corrections) {
+  const container = document.getElementById("questions");
+  container.innerHTML = "";
+
+  questions.forEach(q => {
+    const section = document.createElement("section");
+    section.className = "card question";
+    section.innerHTML = `
+      <h2>Question ${q.num} - ${escapeHtml(q.title)}</h2>
+      <div class="question-text">${escapeHtml(q.text)}</div>
+      <textarea id="answer-${q.num}" placeholder="Écris ta réponse ici..."></textarea>
+      <div class="note">
+        <label for="note-${q.num}">Auto-note :</label>
+        <input id="note-${q.num}" type="number" min="0" max="${POINTS_PER_QUESTION}" step="0.5" placeholder="/ ${POINTS_PER_QUESTION}">
+        <span>/ ${POINTS_PER_QUESTION}</span>
+      </div>
+      <button class="secondary" type="button" onclick="toggleCorrection(${q.num})">Afficher / masquer la correction</button>
+      <div id="correction-${q.num}" class="correction hidden">${escapeHtml(corrections[q.num] || "Correction non trouvée.")}</div>
+    `;
+    container.appendChild(section);
+  });
+}
+
+function toggleCorrection(num) {
+  document.getElementById(`correction-${num}`).classList.toggle("hidden");
+}
+
+function showAllCorrections() {
+  document.querySelectorAll(".correction").forEach(el => el.classList.remove("hidden"));
+}
+
+function calculateScore() {
+  const inputs = document.querySelectorAll("input[id^='note-']");
+  let score = 0;
+  let max = inputs.length * POINTS_PER_QUESTION;
+
+  inputs.forEach(input => {
+    const value = Number(input.value || 0);
+    score += Math.min(Math.max(value, 0), POINTS_PER_QUESTION);
+  });
+
+  const percent = max ? Math.round((score / max) * 100) : 0;
+  const note20 = max ? ((score / max) * 20).toFixed(1) : "0.0";
+  const result = document.getElementById("result");
+  result.classList.remove("hidden");
+  result.innerHTML = `Score : ${score} / ${max} — ${percent}% — Note indicative : ${note20} / 20`;
+  result.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function resetTest() {
+  if (!confirm("Effacer tes réponses et recommencer ?")) return;
+  document.querySelectorAll("textarea").forEach(t => t.value = "");
+  document.querySelectorAll("input[id^='note-']").forEach(i => i.value = "");
+  document.querySelectorAll(".correction").forEach(el => el.classList.add("hidden"));
+  document.getElementById("result").classList.add("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+async function init() {
+  const status = document.getElementById("status");
+  try {
+    const [qRes, cRes] = await Promise.all([fetch(QUESTIONS_URL), fetch(CORRECTIONS_URL)]);
+    if (!qRes.ok) throw new Error(`Questions introuvables (${qRes.status})`);
+    if (!cRes.ok) throw new Error(`Corrections introuvables (${cRes.status})`);
+
+    const [qMd, cMd] = await Promise.all([qRes.text(), cRes.text()]);
+    const questions = parseQuestions(qMd);
+    const corrections = parseCorrections(cMd);
+
+    if (!questions.length) throw new Error("Aucune question détectée.");
+
+    renderQuestions(questions, corrections);
+    status.textContent = `${questions.length} questions chargées.`;
+    document.getElementById("toolbar").classList.remove("hidden");
+  } catch (err) {
+    status.classList.add("error");
+    status.innerHTML = `<strong>Erreur :</strong> ${escapeHtml(err.message)}`;
+  }
+}
+
+document.getElementById("scoreBtn").addEventListener("click", calculateScore);
+document.getElementById("showAllBtn").addEventListener("click", showAllCorrections);
+document.getElementById("resetBtn").addEventListener("click", resetTest);
+init();
+</script>
+</body>
+</html>
