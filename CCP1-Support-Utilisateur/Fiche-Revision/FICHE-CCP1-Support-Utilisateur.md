@@ -6,7 +6,7 @@
 
 ## 1. MÉTHODOLOGIE TICKETS
 
-### Cycle de vie ticket Axel
+### Cycle de vie ticket
 1. **Ouverture** : Identification utilisateur, description problème
 2. **Qualification** : Catégorie (matériel/logiciel/réseau), criticité
 3. **Priorisation** : P1 (bloquant) → P4 (confort)
