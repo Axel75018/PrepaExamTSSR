@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>QCM Virtualisation - CCP5</title>
+  <style>
+    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; color: #111827; background: #f8fafc; }
+    body { margin: 0; }
+    header { background: #111827; color: white; padding: 24px; }
+    header h1 { margin: 0 0 8px; font-size: 2rem; }
+    main { max-width: 980px; margin: 0 auto; padding: 24px; }
+    .card { background: white; border: 1px solid #e5e7eb; border-radius: 14px; padding: 18px; margin: 16px 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+    .question h3 { margin-top: 0; }
+    label { display: block; padding: 10px 12px; margin: 8px 0; border: 1px solid #e5e7eb; border-radius: 10px; cursor: pointer; }
+    label:hover { background: #f9fafb; }
+    input[type="radio"] { margin-right: 8px; }
+    button { border: 0; border-radius: 10px; padding: 12px 18px; font-weight: 700; cursor: pointer; margin-right: 10px; }
+    .primary { background: #2563eb; color: white; }
+    .secondary { background: #e5e7eb; color: #111827; }
+    .badBtn { background: #fee2e2; color: #991b1b; }
+    .good { border-color: #16a34a; background: #f0fdf4; }
+    .bad { border-color: #dc2626; background: #fef2f2; }
+    .answer { margin-top: 10px; padding: 12px; border-radius: 10px; background: #f3f4f6; white-space: pre-wrap; }
+    .hidden { display: none; }
+    .score { font-size: 1.5rem; font-weight: 800; }
+    .toolbar { position: sticky; bottom: 0; background: rgba(248,250,252,.95); border-top: 1px solid #e5e7eb; padding: 16px 0; backdrop-filter: blur(8px); }
+    .error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; padding: 12px; border-radius: 10px; }
+    a { color: #2563eb; font-weight: 700; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>QCM Virtualisation - CCP5</h1>
+  <p>40 questions — coche tes réponses, valide, consulte ton score et les corrections.</p>
+</header>
+
+<main>
+  <section id="status" class="card">Chargement du QCM depuis GitHub…</section>
+  <section id="result" class="card hidden"></section>
+  <form id="quiz"></form>
+  <div class="toolbar hidden" id="toolbar">
+    <button class="primary" type="button" id="submitBtn">Valider le test</button>
+    <button class="secondary" type="button" id="showAllBtn">Afficher toutes les corrections</button>
+    <button class="badBtn" type="button" id="resetBtn">Nouveau test</button>
+  </div>
+</main>
+
+<script>
+const QUESTIONS_URL = "https://raw.githubusercontent.com/Axel75018/PrepaExamTSSR/main/CCP5-Virtualisation/QCM/Evaluation/QCM-Virtualisation-40Q.md";
+const CORRECTIONS_URL = "https://raw.githubusercontent.com/Axel75018/PrepaExamTSSR/main/CCP5-Virtualisation/QCM/Correction/QCM-Virtualisation-40Q-CORRECTION.md";
+
+let questions = [];
+let corrections = new Map();
+
+const statusEl = document.getElementById("status");
+const quizEl = document.getElementById("quiz");
+const resultEl = document.getElementById("result");
+const toolbarEl = document.getElementById("toolbar");
+
+function normalize(md) {
+  return md
+    .replace(/\r/g, "")
+    .replace(/(---)/g, "\n$1\n")
+    .replace(/(###\s*(?:❓\s*)?Question\s*\d+)/gi, "\n$1")
+    .replace(/(-\s*\[\s*\]\s*[A-D]\))/g, "\n$1")
+    .replace(/(\*\*Question\s*\d+\s*:\s*[A-D]\))/gi, "\n$1");
+}
+
+function parseQuestions(md) {
+  md = normalize(md);
+  const blocks = md.split(/\n###\s*(?:❓\s*)?Question\s+/i).slice(1);
+
+  return blocks.map(block => {
+    const num = Number(block.match(/^(\d+)/)?.[1]);
+    const content = block.replace(/^\d+\s*(?:[-–:]\s*[^\n]+)?/, "").trim();
+    const firstOptionIndex = content.search(/-\s*\[\s*\]\s*A\)/i);
+    if (!num || firstOptionIndex < 0) return null;
+
+    const title = content.slice(0, firstOptionIndex).trim();
+    const optionPart = content.slice(firstOptionIndex);
+    const optionRegex = /-\s*\[\s*\]\s*([A-D])\)\s*([\s\S]*?)(?=\n-\s*\[\s*\]\s*[A-D]\)|\n###\s*(?:❓\s*)?Question\s+\d+|\n---|$)/gi;
+    const options = [];
+    let match;
+    while ((match = optionRegex.exec(optionPart)) !== null) {
+      options.push({ letter: match[1].toUpperCase(), text: match[2].trim() });
+    }
+    return { num, title, options };
+  }).filter(q => q && q.options.length);
+}
+
+function parseCorrections(md) {
+  md = normalize(md);
+  const map = new Map();
+  const regex = /\*\*Question\s*(\d+)\s*:\s*([A-D])\)([\s\S]*?)(?=\n\*\*Question\s*\d+\s*:\s*[A-D]\)|\n---|$)/gi;
+  let match;
+  while ((match = regex.exec(md)) !== null) {
+    const num = Number(match[1]);
+    const letter = match[2].toUpperCase();
+    const detail = (`Question ${num} : ${letter})` + match[3]).trim();
+    map.set(num, { letter, detail });
+  }
+  return map;
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"]/g, s => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[s]));
+}
+
+function renderQuiz() {
+  quizEl.innerHTML = questions.map(q => `
+    <article class="card question" id="q${q.num}">
+      <h3>Question ${q.num}</h3>
+      <p>${escapeHtml(q.title)}</p>
+      ${q.options.map(opt => `
+        <label data-q="${q.num}" data-letter="${opt.letter}">
+          <input type="radio" name="q${q.num}" value="${opt.letter}">
+          <strong>${opt.letter})</strong> ${escapeHtml(opt.text)}
+        </label>
+      `).join("")}
+      <div class="answer hidden" id="answer-${q.num}"></div>
+    </article>
+  `).join("");
+}
+
+function showCorrection(qNum) {
+  const correction = corrections.get(qNum);
+  const box = document.getElementById(`answer-${qNum}`);
+  if (!box) return;
+  box.textContent = correction ? correction.detail : "Correction non trouvée.";
+  box.classList.remove("hidden");
+}
+
+function submitQuiz() {
+  let score = 0;
+  const wrong = [];
+  const unanswered = [];
+
+  questions.forEach(q => {
+    const selected = document.querySelector(`input[name="q${q.num}"]:checked`);
+    const correction = corrections.get(q.num);
+    const goodLetter = correction?.letter;
+
+    document.querySelectorAll(`label[data-q="${q.num}"]`).forEach(label => {
+      label.classList.remove("good", "bad");
+      if (label.dataset.letter === goodLetter) label.classList.add("good");
+    });
+
+    if (!selected) {
+      unanswered.push(q.num);
+    } else if (selected.value === goodLetter) {
+      score++;
+    } else {
+      wrong.push(q.num);
+      const badLabel = document.querySelector(`label[data-q="${q.num}"][data-letter="${selected.value}"]`);
+      if (badLabel) badLabel.classList.add("bad");
+    }
+
+    showCorrection(q.num);
+  });
+
+  const total = questions.length;
+  const percent = Math.round((score / total) * 100);
+  const wrongLinks = wrong.map(n => `<a href="#q${n}">${n}</a>`).join(", ");
+  const unansweredLinks = unanswered.map(n => `<a href="#q${n}">${n}</a>`).join(", ");
+
+  resultEl.innerHTML = `
+    <div class="score">Score : ${score} / ${total} — ${percent}%</div>
+    ${wrong.length ? `<p>Questions fausses : ${wrongLinks}.</p>` : `<p>Aucune erreur 🎉</p>`}
+    ${unanswered.length ? `<p>Non répondues : ${unansweredLinks}.</p>` : ""}
+  `;
+  resultEl.classList.remove("hidden");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function showAllCorrections() {
+  questions.forEach(q => showCorrection(q.num));
+}
+
+function resetQuiz() {
+  document.querySelectorAll("input[type=radio]").forEach(i => i.checked = false);
+  document.querySelectorAll("label").forEach(l => l.classList.remove("good", "bad"));
+  document.querySelectorAll(".answer").forEach(a => a.classList.add("hidden"));
+  resultEl.classList.add("hidden");
+  resultEl.innerHTML = "";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+async function init() {
+  try {
+    const [qRes, cRes] = await Promise.all([fetch(QUESTIONS_URL), fetch(CORRECTIONS_URL)]);
+    if (!qRes.ok || !cRes.ok) throw new Error("Impossible de charger les fichiers Markdown.");
+
+    const [qMd, cMd] = await Promise.all([qRes.text(), cRes.text()]);
+    questions = parseQuestions(qMd);
+    corrections = parseCorrections(cMd);
+
+    if (!questions.length) throw new Error("Aucune question détectée. Vérifie le format Markdown.");
+
+    renderQuiz();
+    statusEl.textContent = `${questions.length} questions chargées.`;
+    toolbarEl.classList.remove("hidden");
+  } catch (err) {
+    statusEl.innerHTML = `<div class="error"><strong>Erreur :</strong> ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+document.getElementById("submitBtn").addEventListener("click", submitQuiz);
+document.getElementById("showAllBtn").addEventListener("click", showAllCorrections);
+document.getElementById("resetBtn").addEventListener("click", resetQuiz);
+
+init();
+</script>
+</body>
+</html>
